@@ -186,3 +186,8 @@ scale = scale*10/(np.iinfo(np.uint16).max+1)
 
 converted = eI*scale - interscept
 ```
+
+## Open issues
+- Since I don't have access to 24bit DAC I cannot confirm the data format of ``uint16_t``.
+- The analysis does not extract the events
+- There are +3B or +2B offsets when reading addresses from the index table
