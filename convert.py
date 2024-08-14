@@ -128,6 +128,7 @@ class DXDReader:
 
         stored_channels = self.setup.findall(".//StoredChannels/Channel")
         self.number_of_channels = sum(['AI' in x.attrib['Index'] for x in stored_channels])
+        self.sample_rate = float(self.setup.findall(".//SampleRate")[0].text)
 
     def parse_pages(self):
         next_db_loc = self.get_dbdata()
@@ -153,6 +154,16 @@ class DXDReader:
 
         self.__file.seek(data_start)
         return np.frombuffer(self.__file.read(data_len), dtype=dt)
+
+    def get_chanel_name(self, channel):
+        assert channel < self.number_of_channels
+
+        name = self.setup.findall(f".//Slot[@Index='0']/OutputChannel/Name")[0].text
+        # name = slot.findall('Name')[0].text
+        # unit = slot.findall('Unit')[0].text
+        # scale = slot.findall('AmplScale')[0].text
+        # offset = slot.findall('AmplOffset')[0].text
+        return name#, unit, scale, offset
 
     def get_channel_data(self, wish):
         assert wish < self.number_of_channels

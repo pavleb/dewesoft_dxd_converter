@@ -7,6 +7,25 @@ They are available for Windows and Linux platforms.
 Additionally, there are several python wrappers available to read the data.
 It turns out that the format is not that complicated and can be read with a few lines of code.
 
+## Usage
+The complete parser is written in [convert.py](convert.py).
+The simple usage is shown below:
+```python
+import convert
+fname = 'sin_freq_9_500000_20190319_073502.dxd'
+
+cc = convert.DXDReader(fname)
+print(f'Number of channels {cc.number_of_channels}')
+print(f'Sample rate {cc.sample_rate}')
+
+channel_number = 2
+eIn = cc.get_channel_data(channel_number)
+print(cc.get_chanel_name(channel_number), cc.sample_rate)
+
+cc.close()
+```
+The converter depends on ``numpy`` and ``tqdm``.
+
 ## Structure of the DXD file
 The data are stored in pages.
 The format is in little endian.
