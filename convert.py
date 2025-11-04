@@ -44,7 +44,10 @@ class DXDReader:
         s = self.tostr(A)
         return s.find(key)
 
-    def get_addr(self, A,key, offset = 2):
+    def get_addr(self, A,key):
+        offset = 8 - len(key)
+        if offset < 0:
+            raise Exception('Key too long')
         ind = self.search_key(A,key)
         if ind < 0:
             raise Execption('Not found')
@@ -68,7 +71,7 @@ class DXDReader:
     
     def get_xml_location(self):
         A = self.read_chunk(self.get_index(),2048)
-        return self.get_addr(A,'SETUP',3)
+        return self.get_addr(A,'SETUP')
     
     def get_page_len(self, A):
         page_start = 0
