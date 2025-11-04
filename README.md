@@ -1,5 +1,85 @@
-# Converting Dewesoft DXD files
+# Converting Dewesoft files
 
+## DXZ file format
+DXZ is a compressed format used by Dewesoft to store data.
+The format is based on ZIP compression.
+The files can be easily unzipped using standard unzip tools.
+The result is a set of following files:
+
+```bash
+'BDATA  0'
+'BDATA  1'
+BinaryFiles
+DATEINFO
+DBASDAT2
+DBDATA
+EVENTS
+IBDATA0
+IBDATA1
+IBDATA2
+IBDATA3
+IBDATA4
+IBDATA5
+INFO
+INFO_
+LASTPIC
+LICINFO
+MEASINFO
+SETUP
+SETUP_
+SVDATA2
+SVINFO
+```
+Binary data are stored in file ``DBDATA``.
+It can be read simply with ``numpy`` as:
+```python
+import numpy as np
+A = np.fromfile('DBDATA',dtype=np.uint8)
+```
+If the data is to big to fit in RAM one can use parts like:
+```python
+A = np.fromfile(root / 'DBDATA',dtype=np.uint8, count=N)
+```
+Where ``N`` is the number of bytes to read.
+
+The next step is to convert the data in approriate format.
+```python
+dt = np.dtype(np.int16)
+dt = dt.newbyteorder('<')    
+B = np.frombuffer(A,dtype=dt)
+```
+
+This gives the raw acccess to the actual DAQ values from the ADC.
+In case the ADC is 24bit the data type should be ``np.int32``.
+
+The next step is proper scaling of the data.
+The scaling factors are stored in the ``SETUP`` file in XML format.
+```python
+import xml.etree.ElementTree as ET
+with open('SETUP','r') as f:
+    xml_data = f.read()
+root = ET.fromstring(xml_data)
+
+sampleRates = [float(sr.text) for sr in root.findall('.//SampleRate')]
+print('Sample rates:', sampleRates)
+for device in ai_dev:
+    print('Device Name:', device.find('.//Name').text)
+    slots = device.findall('.//Slot')
+    for slot in slots:
+        used = slot.find('.//Used')
+        if used is None:
+            continue
+        if used.text == 'True':
+            name = slot.findall('.//Name')[0].text
+            bits = slot.findall('.//BitsLog')[0].text
+            scale = slot.findall('.//Scale')[0].text
+            rangeMin = slot.findall('.//RangeMin')[0].text
+            rangeMax = slot.findall('.//RangeMax')[0].text
+            print(' Slot Name:', name, 'Bits:', bits, 'Scale:', scale, 'Range:', rangeMin, '--', rangeMax)
+```
+
+
+## DXD file format
 Dewesoft has one of the best data acquisition systems on the market. 
 It is used in many industries and applications. The data is stored in a proprietary format called DXD. 
 Dewesoft provides free but not open source libraries to read the data.
@@ -7,7 +87,7 @@ They are available for Windows and Linux platforms.
 Additionally, there are several python wrappers available to read the data.
 It turns out that the format is not that complicated and can be read with a few lines of code.
 
-## Usage
+### Usage
 The complete parser is written in [convert.py](convert.py).
 The simple usage is shown below:
 ```python
@@ -26,7 +106,7 @@ cc.close()
 ```
 The converter depends on ``numpy`` and ``tqdm``.
 
-## Structure of the DXD file
+### Structure of the DXD file
 The data are stored in pages.
 The format is in little endian.
 
@@ -49,7 +129,7 @@ An example of the ``INDEX`` is shown below:
 ```
 In our case the ``__INDEX`` is at the location ``0x80`` and the location is ``0x0200``, which are the bytes just after the tag ``__INDEX`` swapped from little endian.
 
-## Page structure
+### Page structure
 Each page has a starting tag ``PAG1``.
 An example of the first page and location ``0x0200`` obtained using ``hexdump -C`` is shown below:
 ```hexdump
@@ -64,7 +144,7 @@ The next 8 bytes is the location of the previous page or ``0xffffffffffffffff`` 
 The next 8 bytes is the location of the next page or ``0xffffffffffffffff`` if it is the last page.
 
 
-## Index page
+### Index page
 The index page is the first page in the file in our case located at ``0x0200``.
 Full dump is shown below:
 ```hexdump
@@ -95,7 +175,7 @@ At the present we are interested in ``DBDATA`` and ``SETUP``.
 The tag ``DBDATA`` is the location of the binary data.
 The tag ``SETUP`` is the location of the XML data describing the DAQ setup with all correction factors and calibration data.
 
-## Setup page
+### Setup page
 The setup page is the page that contains the XML data.
 From the index above the ``SETUP`` is located at ``0x0c00``.
 Those are the bytes located after +3B from the end of the tag ``SETUP``.
@@ -129,7 +209,7 @@ From the page structure we can see that the previous page is located at ``0xac00
 So starting with offset of ``0x20``B from the beginning of the page one can extract the XML data.
 Concatenating all this together will give the complete XML data that can be easily parsed.
 
-## Structure of the binary data
+### Structure of the binary data
 From the index page tag ``DBDATA`` we can see that the binary data is located at ``0x011800``.
 The header of the page is shown below:
 ```hexdump
@@ -153,7 +233,7 @@ For this page the page type is ``0x08`` and the size of the data is ``0xdbe000``
 Following the same pattern one can parse the complete file and locate the begining of each page its type and data length.
 In such a way one can extract the table of contents of the file.
 
-## Reading the binary data
+### Reading the binary data
 In our case the DAC was 16bit.
 This is also visible from the setup XML.
 The data is stored in little endian in ``uint16_t`` format.
@@ -169,7 +249,7 @@ For multichannel data the data is stored in interleaved format with chunks of 10
 The page sizes are not always multiple of 1000 samples.
 Therefore the remaining samples should be concatenated with the next page.
 
-## Converting the data from ``uint`` to ``float``
+### Converting the data from ``uint`` to ``float``
 From one binary page one can read the data with the following python code:
 ```python
 # data_len is the size of the data in bytes
@@ -206,7 +286,7 @@ scale = scale*10/(np.iinfo(np.uint16).max+1)
 converted = eI*scale - interscept
 ```
 
-## Open issues
+### Open issues
 - Since I don't have access to 24bit DAC I cannot confirm the data format of ``uint16_t``.
 - The analysis does not extract the events
 - There are +3B or +2B offsets when reading addresses from the index table
