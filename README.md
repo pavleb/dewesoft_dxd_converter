@@ -1,9 +1,3 @@
----
-title: Desewosoft DXD and DXZ file converter
-description: Pure python package for converting Dewesoft measurement files without external librarires.
-tags: [dewesoft, dxd, dxz, dxd_converter, data_acquisition, data_conversion]
----
-
 # Converting Dewesoft files
 
 ## DXZ file format
