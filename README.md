@@ -1,4 +1,7 @@
-# Converting Dewesoft files
+# Dewesoft DXD Converter (Pure Python)
+
+Convert **Dewesoft .dxd .dxz** measurement files to **NumPy/CSV** using pure Python—**no vendor libraries required**. Works cross-platform and lets you script large DXD/DXZ exports for offline analysis.
+An open-source cross-platform converter for automating large DXD/DXZ exports and analyzing Dewesoft data offline.
 
 ## DXZ file format
 DXZ is a compressed format used by Dewesoft to store data.
