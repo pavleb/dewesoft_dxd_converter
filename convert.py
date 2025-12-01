@@ -126,12 +126,16 @@ class DXDReader:
         # return self.tostr(np.concatenate(xml_data)).strip()
         self.root = ET.fromstring(self.tostr(np.concatenate(xml_data)).strip())
         self.setup = list(self.root.iter('DewesoftSetup'))[0]
-        self.devices = self.setup.findall(".//Device[@Type='AI']")[0]
-        slots = self.devices.findall('.//Slot')
+        self.devices = self.setup.findall(".//Device[@Type='AI']")
+        # slots = self.devices.findall('.//Slot')
 
         stored_channels = self.setup.findall(".//StoredChannels/Channel")
         self.number_of_channels = sum(['AI' in x.attrib['Index'] for x in stored_channels])
-        self.sample_rate = float(self.setup.findall(".//SampleRate")[0].text)
+        self.sample_rates = [float(sr.text) for sr in self.root.findall('.//SampleRate')]
+
+    @property
+    def number_of_devices(self):
+        return len(self.devices)
 
     def parse_pages(self):
         next_db_loc = self.get_dbdata()
@@ -158,10 +162,29 @@ class DXDReader:
         self.__file.seek(data_start)
         return np.frombuffer(self.__file.read(data_len), dtype=dt)
 
+
+    def get_channel_info(self):
+        channel_info = []
+        for device in self.devices:
+            slots = device.findall('.//Slot')
+            for slot in slots:
+                used = slot.find('.//Used')
+                if used is None:
+                    continue
+                if used.text == 'True':
+                    name = slot.findall('.//Name')[0].text
+                    bits = slot.findall('.//BitsLog')[0].text
+                    scale = slot.findall('.//AmplScale')[0].text
+                    offset = slot.findall('.//AmplOffset')[0].text
+                    rangeMin = slot.findall('.//RangeMin')[0].text
+                    rangeMax = slot.findall('.//RangeMax')[0].text
+                    channel_info.append({'name': name, 'bits': bits, 'scale': scale, 'offset': offset, 'rangeMin': rangeMin, 'rangeMax': rangeMax})
+        return channel_info 
+
     def get_chanel_name(self, channel):
         assert channel < self.number_of_channels
 
-        name = self.setup.findall(f".//Slot[@Index='0']/OutputChannel/Name")[0].text
+        name = self.setup.findall(f".//Slot[@Index='{channel}']/OutputChannel/Name")[0].text
         # name = slot.findall('Name')[0].text
         # unit = slot.findall('Unit')[0].text
         # scale = slot.findall('AmplScale')[0].text

@@ -65,6 +65,7 @@ root = ET.fromstring(xml_data)
 
 sampleRates = [float(sr.text) for sr in root.findall('.//SampleRate')]
 print('Sample rates:', sampleRates)
+ai_dev = root.findall('.//Device[@Type="AI"]')
 for device in ai_dev:
     print('Device Name:', device.find('.//Name').text)
     slots = device.findall('.//Slot')
