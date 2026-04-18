@@ -5,7 +5,221 @@ import numpy as np
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from tqdm import tqdm
+import zipfile
+import tempfile
+from dataclasses import dataclass, field
+from typing import List, Optional
 
+@dataclass
+class DewesoftEventRecord:
+    event_id: int
+    event_type: int  # 1 for etStart, 2 for etStop
+    bucket_index: int
+    sample_offset: int
+    
+    @property
+    def true_sample_index(self, block_size: int = 1000) -> int:
+        return (self.bucket_index * block_size) + self.sample_offset
+
+class DewesoftEventsParser:
+    def __init__(self, file_path: str):
+        self.raw_data = np.fromfile(file_path, dtype=np.uint8)
+        self.signature = np.array([69, 118, 101, 110, 116, 83], dtype=np.uint8) # "EventS"
+        
+    def parse(self) -> List[DewesoftEventRecord]:
+        records = []
+        found_count = 0
+        
+        # Scan for the 0x86 "Envelope"
+        for i in range(len(self.raw_data) - 30):
+            if self.raw_data[i] == 0x86 and np.array_equal(self.raw_data[i+1:i+7], self.signature):
+                
+                # THE FIX: The Event Type is the 4-byte integer immediately PRECEDING the 0x86
+                # We look at i-4 to i
+                if i >= 4:
+                    e_type = self.raw_data[i-4:i].view(np.int32)[0]
+                else:
+                    e_type = 0 # Fallback for safety
+                
+                record = self._parse_envelope(i, found_count, e_type)
+                if record:
+                    records.append(record)
+                    found_count += 1
+        
+        return records
+
+    def _parse_envelope(self, start_idx: int, e_id: int, e_type: int) -> Optional[DewesoftEventRecord]:
+        # Search window within the 0x86 frame
+        search_limit = min(start_idx + 100, len(self.raw_data))
+        body_start = start_idx + 7 
+        
+        for j in range(body_start, search_limit - 12):
+            prop_id = self.raw_data[j:j+4].view(np.int32)[0]
+            
+            if prop_id == 6:
+                # Based on your correct mapping:
+                # [j+4:j+8]  -> Bucket Index
+                # [j+8:j+12] -> Sample Offset
+                bucket_idx = self.raw_data[j+4:j+8].view(np.int32)[0]
+                offset = self.raw_data[j+8:j+12].view(np.int32)[0]
+                
+                return DewesoftEventRecord(
+                    event_id=e_id,
+                    event_type=e_type,
+                    bucket_index=bucket_idx,
+                    sample_offset=offset
+                )
+        return None
+
+@dataclass
+class ChannelConfig:
+    name: str
+    bits: int
+    scale: float
+    offset: float
+    range_min: float
+    range_max: float
+
+    @property
+    def computed_scale(self) -> float:
+        """
+        The 'Golden Multiplier' used to convert raw binary to engineering units.
+        Logic: (AmplScale * 10) / 2^Bits
+        """
+        return (self.scale * 10.0) / (2**self.bits)
+
+    def scale_data(self, raw_data: np.ndarray) -> np.ndarray:
+        """
+        Applies scaling and offset to a numpy array of raw integers.
+        """
+        # raw_data is likely np.int16 or np.int32 based on BitsLog
+        return (raw_data.astype(np.float64) * self.computed_scale) - self.offset
+
+@dataclass
+class MeasurementSetup:
+    sample_rate: float
+    blockSize: int
+    channels: List[ChannelConfig] = field(default_factory=list)
+    
+    @property
+    def num_channels(self) -> int:
+        return len(self.channels)
+
+    def get_channel_by_name(self, name: str) -> ChannelConfig:
+        for ch in self.channels:
+            if ch.name == name:
+                return ch
+        raise ValueError(f"Channel {name} not found.")
+
+
+class DXZReader:
+    def __init__(self, filename):
+        """
+        DXZ files are ZIP of multiple files each corresponding to a particular page.
+        The converter can accept a filename, whose content is extracted in a temporary folder or a folder that contais already expanded files
+
+        filename - the DXZ file that has to be processed
+        """
+        if not Path(filename).exists():
+            raise Exception('File does not exist')
+        
+        if Path(filename).is_dir():
+            self.__process_folder(filename)
+        else:
+            self.__process_file(filename)        
+
+        
+    
+    def __process_folder(self, folder):
+        folder_path = Path(folder)
+        
+        events_file = folder_path / 'EVENTS'
+        if events_file.exists():
+            parser = DewesoftEventsParser(str(events_file))
+            self.events = parser.parse()
+        else:
+            self.events = []
+            
+        setup_file = folder_path / 'SETUP'
+        if setup_file.exists():
+            self.measurement_setup = self._process_setup(str(folder_path))
+        else:
+            self.measurement_setup = None
+
+        dbdata_file = folder_path / 'DBDATA'
+        if dbdata_file.exists() and self.measurement_setup is not None:
+            A = np.fromfile(str(dbdata_file), dtype=np.uint8)
+            dt = np.dtype(np.uint16)
+            dt = dt.newbyteorder('<')    
+            B = np.frombuffer(A, dtype=dt)
+            self.dbdata_c = np.reshape(B, (-1, self.measurement_setup.blockSize))
+        else:
+            self.dbdata_c = None
+            
+    def get_samples(self, wish: int):
+        if self.dbdata_c is None or self.measurement_setup is None:
+            raise Exception("Data not loaded properly or missing setups.")
+            
+        number_of_channels = self.measurement_setup.num_channels
+        scale = self.measurement_setup.channels[wish].scale
+        nsl = scale * 1 / (np.iinfo(np.uint16).max + 1) 
+        
+        ch_data = self.dbdata_c[wish::number_of_channels, :].reshape(1, -1).squeeze()
+        
+        limit = None
+        if self.events and len(self.events) > 1:
+            limit = self.events[1].sample_offset
+            
+        if limit is not None:
+            return self.measurement_setup.channels[wish].scale_data(ch_data[:limit])
+        else:
+            return self.measurement_setup.channels[wish].scale_data(ch_data)
+
+    
+    def __process_file(self, filename):
+        # Unzip file into temp folder
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with zipfile.ZipFile(filename) as zip_ref:
+                zip_ref.extractall(temp_dir)
+            self.__process_folder(temp_dir)
+
+    def _process_setup(self, folder_path: str) -> MeasurementSetup:
+        with open(Path(folder_path) / 'SETUP', 'r') as f:
+            xml_data = f.read()
+        
+        root = ET.fromstring(xml_data)
+
+        # Global Sample Rate (assuming the first one is the master)
+        sr_element = root.find('.//SampleRate')
+        sr_blockSize = root.find('.//BlockSize')
+        sample_rate = float(sr_element.text) if sr_element is not None else 0.0
+        
+        if sr_blockSize is not None:
+            blockSize = int(sr_blockSize.text)
+        else:
+            raise Exception('BlockSize')
+        
+        setup = MeasurementSetup(sample_rate=sample_rate, blockSize=blockSize)
+
+        # Devices and Slots
+        for device in root.findall('.//Device[@Type="AI"]'):
+            for slot in device.findall('.//Slot'):
+                used = slot.find('.//Used')
+                if used is None:
+                    continue
+                if used.text == 'True':
+                    # Construct the ChannelConfig
+                    ch = ChannelConfig(
+                        name=slot.find('.//Name').text,
+                        bits=int(slot.find('.//BitsLog').text),
+                        scale=float(slot.findall('.//AmplScale')[0].text),
+                        offset=float(slot.findall('.//AmplOffset')[0].text),
+                        range_min=float(slot.find('.//RangeMin').text),
+                        range_max=float(slot.find('.//RangeMax').text)
+                    )
+                    setup.channels.append(ch)
+                    
+        return setup
 
 class DXDReader:
     def __init__(self, filename):

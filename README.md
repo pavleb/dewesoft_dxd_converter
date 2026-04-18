@@ -3,6 +3,96 @@
 Convert **Dewesoft .dxd .dxz** measurement files to **NumPy/CSV** using pure Python—**no vendor libraries required**. Works cross-platform and lets you script large DXD/DXZ exports for offline analysis.
 An open-source cross-platform converter for automating large DXD/DXZ exports and analyzing Dewesoft data offline.
 
+### DXZReader Usage
+You can easily parse `.dxz` files or extracted folders using the `DXZReader` class:
+```python
+import convert
+
+# Point to an extracted DXZ folder or .dxz file
+reader = convert.DXZReader('file.dxz')
+
+# The measurement setup (sample rates, channels, scaling) is automatically parsed
+print(f"Sample Rate: {reader.measurement_setup.sample_rate}")
+print(f"Number of Channels: {reader.measurement_setup.num_channels}")
+
+# The events are parsed into a list of DewesoftEventRecord
+for event in reader.events:
+    print(f"Event ID: {event.event_id}, Type: {event.event_type}, Offset: {event.sample_offset}")
+
+# Extract sample data for a specific channel (e.g., channel 0)
+# This will return a NumPy array scaled to engineering units
+channel_0_data = reader.get_samples(0)
+print(channel_0_data)
+```
+## Dewesoft EVENTS File Structure
+
+The `EVENTS` file is a binary sidecar file used to synchronize the raw data buckets in `IBDATA` files with real-world timestamps and measurement boundaries (Start/Stop). It utilizes a self-describing property stream encapsulated in record envelopes.
+
+### 1. Global Header
+The file begins with a master index of events present in the measurement.
+
+| Offset | Type  | Description |
+| :--- | :--- | :--- |
+| 0x00 | Int32 | **Total Event Count**: Number of events recorded (usually 2: Start and Stop). |
+| 0x04 | Int32 | **First Event ID**: The type ID of the first event (1 = `etStart`). |
+
+### 2. Event Record Envelope
+Each event is wrapped in a framed structure to ensure parser resiliency.
+
+| Relative Offset | Type | Description |
+| :--- | :--- | :--- |
+| -4 | Int32 | **Event Type**: Matches `DWEventType` enum (1: Start, 2: Stop). |
+| 0  | Byte  | **0x86**: Start-of-Record delimiter. |
+| 1-6| String| **"EventS"**: Record signature. |
+| 7+ | Body  | Data payload containing property blocks. |
+
+### 3. Data Payload (Position Property)
+Inside the record body, data is organized by Property IDs. The most critical for data alignment is Property ID `6` (**Sample Position**).
+
+| Offset | Type | Description |
+| :--- | :--- | :--- |
+| 0 | Int32 | **Property ID (6)**: Identifies the following block as Position Data. |
+| 4 | Int32 | **Bucket Index**: The 1-based index of the 1000-sample block where the event occurred. |
+| 8 | Int32 | **Relative Offset**: A signed 32-bit integer (Two's Complement). |
+| 12| 2xInt32| **Timestamp**: High-precision time data (often 0 for alignment events). |
+
+### 4. Synchronization Logic
+To calculate the exact sample where a measurement ends (the "True End"), the parser combines the Bucket Index and the Relative Offset. Because Dewesoft allocates data in full blocks (e.g., 1000 samples), the `etStop` event uses a negative offset to "trim" the unused padding at the end of the last bucket.
+
+**Formula:**
+`True Sample Index = (Bucket Index * Block Size) + Relative Offset`
+
+**Example (Stop Event):**
+- Bucket Index: `2`
+- Relative Offset: `-952` (represented in binary as `72 252 255 255`)
+- Block Size: `1000`
+- **Result**: `(2 * 1000) - 952 = 1048` total valid samples.
+
+### 5. Record Termination
+| Type | Description |
+| :--- | :--- |
+| 4 Bytes | **0xFF000000**: Property list terminator. |
+| Byte | **0x87**: End-of-Record delimiter. |
+| String | **"EventS\0"**: Closing signature and null terminator. |
+
+### DWEventType Enum Reference
+| Value | Enum Name | Description |
+| :--- | :--- | :--- |
+| 1 | `etStart` | Recording start |
+| 2 | `etStop` | Recording stop |
+| 3 | `etTrigger` | Trigger event |
+| 11 | `etVStart` | Video recording start |
+| 12 | `etVStop` | Video recording stop |
+| 20 | `etKeyboard` | Keyboard input |
+| 21 | `etNotice` | System notice |
+| 22 | `etVoice` | Voice annotation |
+| 23 | `etPicture` | Picture capture |
+| 24 | `etModule` | Module event |
+| 25 | `etAlarm` | Alarm notification |
+| 26 | `etCursorInfo` | Cursor information |
+| 27 | `etAlarmLevel` | Alarm level change |
+
+
 ## DXZ file format
 DXZ is a compressed format used by Dewesoft to store data.
 The format is based on ZIP compression.
@@ -81,6 +171,8 @@ for device in ai_dev:
             rangeMax = slot.findall('.//RangeMax')[0].text
             print(' Slot Name:', name, 'Bits:', bits, 'Scale:', scale, 'Range:', rangeMin, '--', rangeMax)
 ```
+
+
 
 
 ## DXD file format
