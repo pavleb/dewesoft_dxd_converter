@@ -149,7 +149,7 @@ class DXZReader:
         dbdata_file = folder_path / 'DBDATA'
         if dbdata_file.exists() and self.measurement_setup is not None:
             A = np.fromfile(str(dbdata_file), dtype=np.uint8)
-            dt = np.dtype(np.uint16)
+            dt = np.dtype(np.int16)
             dt = dt.newbyteorder('<')    
             B = np.frombuffer(A, dtype=dt)
             self.dbdata_c = np.reshape(B, (-1, self.measurement_setup.blockSize))
