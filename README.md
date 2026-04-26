@@ -6,10 +6,10 @@ An open-source cross-platform converter for automating large DXD/DXZ exports and
 ### DXZReader Usage
 You can easily parse `.dxz` files or extracted folders using the `DXZReader` class:
 ```python
-import convert
+import dewesoft_dxd_converter
 
 # Point to an extracted DXZ folder or .dxz file
-reader = convert.DXZReader('file.dxz')
+reader = dewesoft_dxd_converter.DXZReader('file.dxz')
 
 # The measurement setup (sample rates, channels, scaling) is automatically parsed
 print(f"Sample Rate: {reader.measurement_setup.sample_rate}")
@@ -187,10 +187,10 @@ It turns out that the format is not that complicated and can be read with a few 
 The complete parser is written in [convert.py](convert.py).
 The simple usage is shown below:
 ```python
-import convert
+import dewesoft_dxd_converter
 fname = 'sin_freq_9_500000_20190319_073502.dxd'
 
-cc = convert.DXDReader(fname)
+cc = dewesoft_dxd_converter.DXDReader(fname)
 print(f'Number of channels {cc.number_of_channels}')
 print(f'Sample rate {cc.sample_rate}')
 
