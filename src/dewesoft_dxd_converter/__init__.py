@@ -169,8 +169,9 @@ class DXZReader:
         limit = None
         if self.events and len(self.events) > 1:
             limit = self.events[1].sample_offset
+    
             
-        if limit is not None:
+        if (limit is not None) and limit != 0:
             return self.measurement_setup.channels[wish].scale_data(ch_data[:limit])
         else:
             return self.measurement_setup.channels[wish].scale_data(ch_data)
@@ -183,6 +184,17 @@ class DXZReader:
                 zip_ref.extractall(temp_dir)
             self.__process_folder(temp_dir)
 
+    def __sample_date_read(self, folder_path: str) -> float:
+        with open(Path(folder_path) / 'INFO_', 'r') as f:
+            xml_data = f.read()
+        
+        root = ET.fromstring(xml_data)
+
+        # Global Sample Rate (assuming the first one is the master)
+        sr_element = root.find('.//SampleRate')
+        sample_rate = float(sr_element.text) if sr_element is not None else 0.0
+        return sample_rate
+
     def _process_setup(self, folder_path: str) -> MeasurementSetup:
         with open(Path(folder_path) / 'SETUP', 'r') as f:
             xml_data = f.read()
@@ -192,7 +204,7 @@ class DXZReader:
         # Global Sample Rate (assuming the first one is the master)
         sr_element = root.find('.//SampleRate')
         sr_blockSize = root.find('.//BlockSize')
-        sample_rate = float(sr_element.text) if sr_element is not None else 0.0
+        sample_rate = self.__sample_date_read(folder_path)
         
         if sr_blockSize is not None:
             blockSize = int(sr_blockSize.text)
